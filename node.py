@@ -85,48 +85,38 @@ class Node:
         _, _, self.profile = self.create_xy_table(node_y, cutoff=cutoff, ratio=ratio)
         return self.profile
 
-#    def create_xy_table(self, node2, cutoff=100, ratio=20.0, transform=None):
-#        """
-#        Canonical XY table in normalized frequency space.
-#        Optional transform is applied only to output values.
-#        """
-#        transform = identity_freq if transform is None else transform
-#
-#        keys1 = self.keys_sorted_by_frequency(cutoff=cutoff)
-#        freq1 = self.get_frequencies(limit=cutoff)
-#        freq2 = node2.get_frequencies(limit=cutoff)
-#
-#        x, y, final_keys = [], [], []
-#        for key in keys1:
-#            f1, f2 = freq1.get(key, 0), freq2.get(key, 0)
-#            if f1 != 0 and f2 / (f1 + 0.001) < ratio:
-#                x.append(transform(f1))
-#                y.append(transform(f2))
-#                final_keys.append(key)
-#        return x, y, final_keys
-
-
     def create_xy_table(self, node2, cutoff=100):
-        keys1 = self.keys_sorted_by_frequency(cutoff=cutoff)
         freq1 = self.get_frequencies(limit=cutoff)
         freq2 = node2.get_frequencies(limit=cutoff)
-
+    
+        all_keys = sorted(set(freq1.keys()) | set(freq2.keys()))
+    
         x, y, final_keys = [], [], []
-        for key in keys1:
-            f1, f2 = freq1.get(key, 0), freq2.get(key, 0)
+        for key in all_keys:
+            f1 = freq1.get(key, 0.0)
+            f2 = freq2.get(key, 0.0)
             x.append(f1)
             y.append(f2)
             final_keys.append(key)
-
+    
         return x, y, final_keys
+
 
     def show_top(self, node2, cutoff=20, ratio=0.5):
         x, y, keys = self.create_xy_table(node2, cutoff=cutoff)
-
+    
+        rows = []
+        for xi, yi, word in zip(x, y, keys):
+            r = math.sqrt(xi**2 + yi**2)
+            rows.append((r, xi, yi, word))
+    
+        rows.sort(reverse=True)
+    
         with open(self.name + '.csv', 'w') as target:
-            for xi, yi, word in zip(x, y, keys):
+            for _, xi, yi, word in rows[:cutoff]:
                 target.write("{},{},{}\n".format(str(xi), str(yi), word))
                 print("%.4f" % xi, "%.4f" % yi, word)
+
 
     def visualize(self, background, num_labeled=10, viz=True, cutoff=100,
                   band_ratio=0.5, black_hole_radius=0.002,
@@ -148,51 +138,80 @@ class Node:
         ax.set_ylim(low, y_high)
         ax.set_aspect('equal')
 
-        categories = classify_points(lst_x, lst_y, keys, k=1.5, black_hole_radius=black_hole_radius)
+        k = 1 + band_ratio
+        categories = classify_points(lst_x, lst_y, keys, k=k, black_hole_radius=black_hole_radius)
         colors = [color_map[c] for c in categories]
 
         ax.scatter(lst_x, lst_y, c=colors)
 
-        points = []
+        # score labels differently by region
+        diag_points = []
+        x_points = []
+        y_points = []
+
         for xi, yi, w, c in zip(lst_x, lst_y, keys, categories):
             r = math.sqrt(xi**2 + yi**2)
-            points.append((xi, yi, w, c, r))
 
-        by_cat = {
-            "diagonal": [],
-            "x_axis": [],
-            "y_axis": [],
-            "black_hole": []
-        }
+            # never label black-hole words
+            if r < black_hole_radius:
+                continue
 
-        for p in points:
-            by_cat[p[3]].append(p)
+            # if we're in a zoomed panel, only label visible points
+            if xi > x_high or yi > y_high:
+                continue
 
-        for cat in by_cat:
-            by_cat[cat].sort(key=lambda t: t[4], reverse=True)
+            if c == "diagonal":
+                # strong + close to diagonal
+                score = r - abs(yi - xi)
+                diag_points.append((score, xi, yi, w))
+            elif c == "x_axis":
+                # prefer words strongly biased toward corpus A
+                score = xi - yi
+                x_points.append((score, xi, yi, w))
+            elif c == "y_axis":
+                # prefer words strongly biased toward corpus B
+                score = yi - xi
+                y_points.append((score, xi, yi, w))
 
-        label_limits = {
-            "diagonal": num_labeled,
-            "x_axis": num_labeled,
-            "y_axis": num_labeled,
-            "black_hole": 0
-        }
+        diag_points.sort(reverse=True)
+        x_points.sort(reverse=True)
+        y_points.sort(reverse=True)
 
-        for cat, limit in label_limits.items():
-            for xi, yi, w, c, r in by_cat[cat][:limit]:
-                if xi <= x_high and yi <= y_high:
-                    ax.annotate(
-                        w,
-                        (xi, yi),
-                        fontsize=9,
-                        xytext=(3, 3),
-                        textcoords='offset points'
-                    )
+        # separate label budgets per region
+        diag_n = num_labeled
+        x_n = num_labeled
+        y_n = num_labeled
+
+        for _, xi, yi, w in diag_points[:diag_n]:
+            ax.annotate(
+                w,
+                (xi, yi),
+                fontsize=9,
+                xytext=(3, 3),
+                textcoords='offset points'
+            )
+
+        for _, xi, yi, w in x_points[:x_n]:
+            ax.annotate(
+                w,
+                (xi, yi),
+                fontsize=9,
+                xytext=(3, 6),
+                textcoords='offset points'
+            )
+
+        for _, xi, yi, w in y_points[:y_n]:
+            ax.annotate(
+                w,
+                (xi, yi),
+                fontsize=9,
+                xytext=(3, 3),
+                textcoords='offset points'
+            )
 
         xs = [low, x_high]
         ax.plot(xs, xs, linestyle='--')
 
-        k = 1 + band_ratio
         upper = [x * k for x in xs]
         lower = [x / k for x in xs]
 
