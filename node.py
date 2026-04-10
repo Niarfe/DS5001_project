@@ -110,14 +110,14 @@ class Node:
         keys1 = self.keys_sorted_by_frequency(cutoff=cutoff)
         freq1 = self.get_frequencies(limit=cutoff)
         freq2 = node2.get_frequencies(limit=cutoff)
-    
+
         x, y, final_keys = [], [], []
         for key in keys1:
             f1, f2 = freq1.get(key, 0), freq2.get(key, 0)
             x.append(f1)
             y.append(f2)
             final_keys.append(key)
-    
+
         return x, y, final_keys
 
     def show_top(self, node2, cutoff=20, ratio=0.5):
@@ -129,27 +129,30 @@ class Node:
                 print("%.4f" % xi, "%.4f" % yi, word)
 
     def visualize(self, background, num_labeled=10, viz=True, cutoff=100,
-                  band_ratio=0.5, black_hole_radius=0.002):
+                  band_ratio=0.5, black_hole_radius=0.002,
+                  ax=None, xmax=None, ymax=None):
 
         lst_x, lst_y, keys = self.create_xy_table(background, cutoff=cutoff)
 
-        fig, ax = plt.subplots()
+        if ax is None:
+            fig, ax = plt.subplots()
 
         max_val = max(lst_x + lst_y) if (lst_x and lst_y) else 1.0
         high = max_val * 1.1
         low = 0.0
 
-        ax.set_xlim(low, high)
-        ax.set_ylim(low, high)
+        x_high = xmax if xmax is not None else high
+        y_high = ymax if ymax is not None else high
+
+        ax.set_xlim(low, x_high)
+        ax.set_ylim(low, y_high)
         ax.set_aspect('equal')
 
         categories = classify_points(lst_x, lst_y, keys, k=1.5, black_hole_radius=black_hole_radius)
         colors = [color_map[c] for c in categories]
 
-        # draw points
         ax.scatter(lst_x, lst_y, c=colors)
 
-        # ----- rank points by radius within each category -----
         points = []
         for xi, yi, w, c in zip(lst_x, lst_y, keys, categories):
             r = math.sqrt(xi**2 + yi**2)
@@ -168,7 +171,6 @@ class Node:
         for cat in by_cat:
             by_cat[cat].sort(key=lambda t: t[4], reverse=True)
 
-        # label only the strongest words in each visible region
         label_limits = {
             "diagonal": num_labeled,
             "x_axis": num_labeled,
@@ -178,19 +180,18 @@ class Node:
 
         for cat, limit in label_limits.items():
             for xi, yi, w, c, r in by_cat[cat][:limit]:
-                ax.annotate(
-                    w,
-                    (xi, yi),
-                    fontsize=9,
-                    xytext=(3, 3),
-                    textcoords='offset points'
-                )
+                if xi <= x_high and yi <= y_high:
+                    ax.annotate(
+                        w,
+                        (xi, yi),
+                        fontsize=9,
+                        xytext=(3, 3),
+                        textcoords='offset points'
+                    )
 
-        # main diagonal
-        xs = [low, high]
+        xs = [low, x_high]
         ax.plot(xs, xs, linestyle='--')
 
-        # multiplicative diagonal band
         k = 1 + band_ratio
         upper = [x * k for x in xs]
         lower = [x / k for x in xs]
@@ -198,7 +199,6 @@ class Node:
         ax.plot(xs, upper, linestyle=':')
         ax.plot(xs, lower, linestyle=':')
 
-        # black-hole
         circle = Circle((0, 0), black_hole_radius, fill=False)
         ax.add_patch(circle)
 
@@ -206,13 +206,43 @@ class Node:
         ax.set_ylabel("Normalized frequency in corpus B")
         ax.set_title("Word Frequency Geometry")
 
-        if viz:
+        if viz and ax is not None and ax.figure:
             plt.show()
-        else:
-            name = self.name if self.name else 'anon'
-            plt.savefig(name)
 
+    def visualize_dual(self, background, num_labeled=10, cutoff=100,
+                       band_ratio=0.5, black_hole_radius=0.002,
+                       zoom_max=0.03):
 
+        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+        # Full view
+        self.visualize(
+            background,
+            num_labeled=num_labeled,
+            viz=False,
+            cutoff=cutoff,
+            band_ratio=band_ratio,
+            black_hole_radius=black_hole_radius,
+            ax=axes[0]
+        )
+        axes[0].set_title("Full View")
+
+        # Zoomed view
+        self.visualize(
+            background,
+            num_labeled=num_labeled,
+            viz=False,
+            cutoff=cutoff,
+            band_ratio=band_ratio,
+            black_hole_radius=black_hole_radius,
+            ax=axes[1],
+            xmax=zoom_max,
+            ymax=zoom_max
+        )
+        axes[1].set_title(f"Zoomed View (0 to {zoom_max})")
+
+        plt.tight_layout()
+        plt.show()
 
 def classify_points(x, y, words, k=1.5, black_hole_radius=0.002, eps=1e-12):
     categories = []
